@@ -4,6 +4,12 @@ A self-scaling, multi-tier web service that elastically adds and removes VMs in 
 built to handle bursty, "Black Friday"-style traffic while meeting latency SLAs and avoiding
 over-provisioning.
 
+> **Deep-dive highlight —** the **scaling loop + load shedding** in `MasterServiceImpl.java`: the
+> master watches pending-request depth to decide when to provision or decommission VMs (with a
+> scale-in cooldown to avoid thrashing), and drops requests that can no longer meet their latency
+> target instead of processing them late. This is the "watch live state → drive node lifecycle"
+> control loop at the heart of the project.
+
 ## The idea
 
 Requests flow through three tiers, coordinated by a master node that watches load and scales the
@@ -44,6 +50,19 @@ fleet up or down in real time:
 Tuned across a series of benchmark experiments; reached **~96% client satisfaction** on oscillating
 ("step up / step down") workloads and sustained heavy peak load (~7 clients/sec) while keeping VM
 usage efficient.
+
+## Key code to look at
+
+The whole orchestration story lives in `src/MasterServiceImpl.java`:
+
+| Lines | What it is |
+|---|---|
+| `312-402` | `scalingLoop()` — the control loop that polls load every 500ms and decides to scale |
+| `348-371` | Scale-**up** logic — scales out on high app-tier pending / queue depth, with a cooldown |
+| `373-393` | Scale-**down** logic — conservative scale-in only after load stays low for a patience window |
+| `266-282` | Startup ordering in `run()` — waits for a readiness threshold before accepting traffic |
+| `288-298` | Load shedding — drops requests that can no longer meet their latency target |
+| `411-449` | `scaleDownAppTier()` — graceful teardown: pick least-loaded victim, drain, then unexport |
 
 ## Tech Stack
 
